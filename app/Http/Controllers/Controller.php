@@ -15,8 +15,6 @@ class Controller extends BaseController
     public function generate()
     {
         $tables = [];
-        $migration_stub = file_get_contents(base_path() . '/resources/files/migration.stub');
-
         foreach (\DB::table('schema_tables')->orderBy('name')->get() as $table) {
             $columns = \DB::table('schema_columns')->where('table_id', $table->id)->get();
             $tables[$table->name] = $columns;
@@ -31,29 +29,36 @@ class Controller extends BaseController
             \Storage::disk('public')->put($table->name . '.json', json_encode($schema, JSON_PRETTY_PRINT));
         }
 
+        $this->generateReferences();
+
+        //return response()->json($this->references);
+        return response()->json($tables);
+    }
+
+    public function generateReferences()
+    {
         if (count($this->references) && !request()->has('no-references')) {
+            $migration_stub = file_get_contents(base_path() . '/resources/files/migration.stub');
+
             foreach ($this->references as $table_name => $references) {
-                $table_name = \Str::snake(\Str::plural($table_name));
-                $migration_up = "Schema::table('${table_name}', function (Blueprint \$table) {";
-                $migration_down = "Schema::table('${table_name}', function (Blueprint \$table) {";
+                $model = \Str::plural($table_name);
+                $table = \Str::snake($model);
+                $migration_up = "Schema::table('${table}', function (Blueprint \$table) {";
+                $migration_down = "Schema::table('${table}', function (Blueprint \$table) {";
                 foreach ($references as $reference) {
                     $name = $reference['name'];
-                    $plural = $reference['plural'];
-                    $migration_up .= PHP_EOL . "            \$table->foreign('${name}')->references('id')->on('${plural}');";
+                    $referenced = (strpos($reference['options'], 'users') !== false) ? 'users' : $reference['referenced'];
+                    $migration_up .= PHP_EOL . "            \$table->foreign('${name}')->references('id')->on('${referenced}');";
                     $migration_down .= PHP_EOL . "            \$table->dropForeign(['${name}']);";
                 }
                 $migration_up .= PHP_EOL . "        });";
                 $migration_down .= PHP_EOL . "        });";
 
-                $migration_file = str_replace([ 'XXXX-UP-XXXX', 'XXXX-DOWN-XXXX' ], [ $migration_up, $migration_down ], $migration_stub);
+                $migration_file = str_replace([ 'XXX-CLASS-XXX', 'XXXX-UP-XXXX', 'XXXX-DOWN-XXXX' ], [ "AddReferencesTo${model}Table", $migration_up, $migration_down ], $migration_stub);
 
-                \Storage::disk('public')->put("/migrations/references/2023-01-01_0000000_add_references_to_${table_name}_table.php", $migration_file);
+                \Storage::disk('public')->put("/migrations/references/2023_01_01_000000_add_references_to_${table}_table.php", $migration_file);
             }
-            return;
         }
-
-        //return response()->json($this->references);
-        return response()->json($tables);
     }
 
     public function isHidden($name, $type)
@@ -63,13 +68,13 @@ class Controller extends BaseController
 
     public function generateColumn($table_name, $name, $type, $type_details = '', $options = '')
     {
-        $plural = $name !== 'id' && $type === 'id' ? \Str::plural(str_replace('_id', '', $name)) : '';
+        $referenced = $name !== 'id' && $type === 'id' ? \Str::plural(str_replace('_id', '', $name)) : '';
 
         return [
             'name' => $name,
-            'dbType' => $this->getDbType($table_name, $name, $type, $type_details, $options, $plural),
-            'htmlType' => $this->isHidden($name, $type) ? '' : $this->getHtmlType($type, $plural),
-            'validations' => $this->isHidden($name, $type) ? '' : $this->getValidations($name, $type, $type_details, $options, $plural),
+            'dbType' => $this->getDbType($table_name, $name, $type, $type_details, $options, $referenced),
+            'htmlType' => $this->isHidden($name, $type) ? '' : $this->getHtmlType($type, $referenced),
+            'validations' => $this->isHidden($name, $type) ? '' : $this->getValidations($name, $type, $type_details, $options, $referenced),
             //'relation' => $this->getRelation($name, $type),
             'searchable' => $this->getOthers($name, $type),
             'fillable' => $this->getOthers($name, $type),
@@ -80,17 +85,17 @@ class Controller extends BaseController
         ];
     }
 
-    public function getDbType($table_name, $name, $type, $type_details = '', $options = '', $plural = '')
+    public function getDbType($table_name, $name, $type, $type_details = '', $options = '', $referenced = '')
     {
         $dbType = $type;
         $nullable = strpos($options, 'nullable') !== false ? ':nullable' : '';
         if ($name !== 'id' && $type === 'id') {
-            $this->references[$table_name] = [ ...($this->references[$table_name] ?? []), [ 'name' => $name, 'plural' => $plural ] ];
+            $this->references[$table_name] = [ ...($this->references[$table_name] ?? []), [ 'name' => $name, 'referenced' => $referenced, 'options' => $options ] ];
 
             return 'foreignId' . $nullable; // 'integer'; // 'foreignId';
         }
         //if ($name !== 'id' && $type === 'select') return 'string' . $nullable; // 'foreignId';
-        //if ($name !== 'id' && $type === 'id') return "integer:unsigned:foreign,${plural},id"  . $nullable;
+        //if ($name !== 'id' && $type === 'id') return "integer:unsigned:foreign,${referenced},id"  . $nullable;
 
         return $dbType . ($type_details ? ',' . $type_details : '')  . $nullable;
     }
@@ -104,11 +109,11 @@ class Controller extends BaseController
         return '';
     }
 
-    public function getHtmlType($type, $plural = '')
+    public function getHtmlType($type, $referenced = '')
     {
         switch ($type) {
             case 'id':
-                //return "select:$${plural}"; // Does not work on v8
+                //return "select:$${referenced}"; // Does not work on v8
                 return "select";
             case 'string':
                 return 'text';
@@ -131,11 +136,12 @@ class Controller extends BaseController
         }
     }
 
-    public function getValidations($name, $type, $type_details = '', $options = '', $plural = '')
+    public function getValidations($name, $type, $type_details = '', $options = '', $referenced = '')
     {
+        $referenced = (strpos($options, 'users') !== false) ? 'users' : $referenced;
         $validations = [ strpos($options, 'nullable') !== false ? 'nullable' : 'required' ];
-        $options = str_replace('nullable', '', $options);
-        if ($options) $validations[] = $options;
+        $real_options = str_replace(['users', 'nullable'], '', $options);
+        if ($real_options) $validations = array_filter(explode('|', $real_options));
 
         $type_details = explode(',', $type_details);
 
@@ -161,7 +167,7 @@ class Controller extends BaseController
         }
 
         if ($type === 'id') {
-            $validations[] = "exists:${plural},id";
+            $validations[] = "exists:${referenced},id";
         }
 
         return implode('|', $validations);
