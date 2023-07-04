@@ -15,7 +15,7 @@ class Controller extends BaseController
     public function generate()
     {
         $tables = [];
-        foreach (\DB::table('schema_tables')->orderBy('name')->get() as $table) {
+        foreach (\DB::table('schema_tables')->where('active', 1)->orderBy('name')->get() as $table) {
             $columns = \DB::table('schema_columns')->where('table_id', $table->id)->get();
             $tables[$table->name] = $columns;
 
@@ -162,6 +162,7 @@ class Controller extends BaseController
                 break;
             case 'date':
             case 'datetime':
+            case 'timestamp':
                 $validations[] = 'date';
                 break;
         }
