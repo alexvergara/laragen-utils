@@ -1,0 +1,7 @@
+
+# Don't forget to ignore User
+php artisan infyom:scaffold Ad --fieldsFile=Ad.json --skip=dump-autoload
+
+
+# Don't forget to add User
+php artisan infyom:api_scaffold Ad --fieldsFile=Ad.json --skip=dump-autoload,migration,model,menu,views
