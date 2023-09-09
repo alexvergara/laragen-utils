@@ -48,7 +48,7 @@ class Controller extends BaseController
                 foreach ($references as $reference) {
                     $name = $reference['name'];
                     $referenced = (strpos($reference['options'], 'users') !== false) ? 'users' : $reference['referenced'];
-                    $migration_up .= PHP_EOL . "            \$table->foreign('${name}')->references('id')->on('${referenced}')->onDelete('cascade);";
+                    $migration_up .= PHP_EOL . "            \$table->foreign('${name}')->references('id')->on('${referenced}')->onDelete('cascade');";
                     $migration_down .= PHP_EOL . "            \$table->dropForeign(['${name}']);";
                 }
                 $migration_up .= PHP_EOL . "        });";
